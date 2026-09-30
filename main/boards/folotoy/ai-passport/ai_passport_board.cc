@@ -1,11 +1,12 @@
 #include "wifi_board.h"
-#include "display/lcd_display.h"
+#include "passport_display.h"
 #include "codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "assets/lang_config.h"
 #include "cw2017_battery_monitor.h"
+#include "mcp_server.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -31,7 +32,7 @@ private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button* adc_button_[kAdcButtonNum];
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
-    LcdDisplay* display_;
+    PassportDisplay* display_;
     Cw2017BatteryMonitor* battery_;
 
     void InitializeCodecI2c() {
@@ -139,6 +140,35 @@ private:
         });
     }
 
+    void InitializeTools() {
+        // The server maps Muse activity codes to these states and pushes them;
+        // see scripts/muse_avatar/README.md for the mapping.
+        McpServer::GetInstance().AddTool(
+            "self.avatar.set_state",
+            "Set the Muse avatar state shown on the screen. state is one of default, working, "
+            "making_something, waiting, approval, limited, syncing, offline, unknown, level_up, "
+            "achievement. subagents is the number of running sub-agents (working only).",
+            PropertyList({
+                Property("state", kPropertyTypeString),
+                Property("subagents", kPropertyTypeInteger, 0, 0, 999),
+            }),
+            [this](const PropertyList& properties) -> ToolResult {
+                auto state = properties["state"].value<std::string>();
+                auto subagents = properties["subagents"].value<int>();
+                if (!MuseAvatar::IsKnownState(state)) {
+                    return std::unexpected("Unknown avatar state: " + state);
+                }
+                if (!display_->HasAvatar()) {
+                    return std::unexpected(std::string("Avatar partition is missing or invalid"));
+                }
+                // McpServer already runs tool callbacks on the main task.
+                if (!display_->SetAvatarState(state, subagents)) {
+                    return std::unexpected("Failed to apply avatar state: " + state);
+                }
+                return true;
+            });
+    }
+
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = DISPLAY_SPI_MOSI_PIN;
@@ -210,10 +240,10 @@ private:
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
 
-        display_ = new SpiLcdDisplay(panel_io, panel,
-                                     DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                     DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        display_ = new PassportDisplay(panel_io, panel,
+                                       DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                       DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
+                                       DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
 public:
@@ -222,6 +252,7 @@ public:
         InitializeSpi();
         InitializeDisplay();
         InitializeButtons();
+        InitializeTools();
         GetBacklight()->RestoreBrightness();
     }
 
