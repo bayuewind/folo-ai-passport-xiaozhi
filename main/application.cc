@@ -1177,6 +1177,16 @@ void Application::Schedule(std::function<void()>&& callback) {
     xEventGroupSetBits(event_group_, MAIN_EVENT_SCHEDULE);
 }
 
+void Application::PlayNotification(const std::string& audio_url, const std::string& subtitle) {
+    std::vector<NotifySubtitle> subtitles;
+    if (!subtitle.empty()) {
+        subtitles.push_back({.start_ms = 0, .text = subtitle});
+    }
+    Schedule([this, url = audio_url, subtitles = std::move(subtitles)]() mutable {
+        StartNotification(std::move(url), std::move(subtitles));
+    });
+}
+
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;

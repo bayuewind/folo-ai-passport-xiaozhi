@@ -14,7 +14,7 @@ server pushes. No real device, no ASR/LLM: it verifies the device side.
 
 | File | Purpose |
 | --- | --- |
-| `server.py` | Test server: OTA, WebSocket protocol, minimal MQTT server (the firmware never subscribes, so pushes go straight down its connection), notify audio, `/push`, `/push-mqtt`, `/avatar`. TTS uses macOS `say`. |
+| `server.py` | Test server: OTA, WebSocket, and MQTT + UDP (a minimal MQTT server — the firmware never subscribes, so pushes go straight down its connection — plus AES-128-CTR Opus over UDP on :8004), notify audio, `/push`, `/push-mqtt`, `/avatar`, `/muse-reply`. TTS uses macOS `say`. With `MUSE_BRIDGE_URL` it is the all-voice Muse front end (below). |
 | `driver.mjs` | Playwright driver on `127.0.0.1:4199`: `/shot`, `/key`, `/say` (feed a WAV at emulated speed), `/eval`, `/reload`, `/quit`. `HEADLESS=0` opens a visible window. |
 | `make_sim_image.py` | Merged firmware + generated NVS (simulator Wi-Fi, `ota_url` → this server) + avatar pack, at offsets read from the image's partition table. |
 | `lan_ip.py` | Host LAN address for the device (skips the fake-IP range of TUN VPNs). |
@@ -23,6 +23,7 @@ server pushes. No real device, no ASR/LLM: it verifies the device side.
 | `scenario2.sh` | 1 kHz tone through the mic path (checks sample rate), alert. |
 | `scenario3.sh` | MQTT, device idle: `notify` voice + subtitles, `alert`. |
 | `scenario_avatar.py` | Muse avatar: every state, animated vs still, correct variant, milestone return, invalid state, free heap. |
+| `scenario_muse_ui.py` | Muse UI, all-voice: home + detail line, card switching, spoken reply + reply card + replay, hold-OK speech to the real Muse and its real reply, double-click undo. |
 | `demo_states.sh` | Visible walk-through of all avatar states (optionally pausing the Muse bridge). |
 
 Generated files (`*.bin`, `*.wav`, `*.log`, `shots/`) are git-ignored.
@@ -52,6 +53,39 @@ FW=sim-avatar.bin ./scenario.sh      # with the server in TRANSPORT=websocket
 ```
 
 `sim.bin` (the default `FW`) is the same image without `--avatar`.
+
+## Muse mode (all-voice)
+
+```sh
+MUSE_BRIDGE_URL=http://127.0.0.1:18787 TRANSPORT=mqtt PACE=6 DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+  uv run --with aiohttp --with opuslib --with cryptography --with faster-whisper python -W ignore server.py
+uv run --with pillow --with numpy python scenario_muse_ui.py sim-avatar.bin   # --skip-muse: no real message
+```
+
+- Hold OK (≥ 400 ms) to talk; the device streams Opus over UDP in manual
+  listening mode and the sentence ends when OK is released.
+- ASR: `ASR=whisper` (default) runs faster-whisper locally. Muse's own
+  dictation (`ASR=muse`, through the bridge) currently returns HTTP 500 from
+  the Muse service. The `small` model downloads slowly from Hugging Face in
+  mainland China; fetch it from ModelScope instead:
+
+  ```sh
+  D=~/.cache/whisper-models/faster-whisper-small; mkdir -p $D
+  for f in config.json tokenizer.json vocabulary.txt model.bin; do
+    curl -fL -o $D/$f https://www.modelscope.cn/models/pengzhendong/faster-whisper-small/resolve/master/$f
+  done
+  ```
+
+- The gateway repeats the sentence ("收到，交给 Muse：…"); a double-click on
+  OK during that or within `UNDO_SECONDS` (3 s) afterwards drops it, otherwise
+  it goes to Muse through the bridge (`POST /send`).
+- The bridge posts each finished Muse reply to `/muse-reply`: the first
+  sentences go to the reply card (`self.muse.set_reply`) and are spoken via
+  `notify`; attachments and code are only announced. A real deployment would
+  summarise with an LLM.
+- The last avatar state is replayed to a device that (re)connects, so it does
+  not wait for the bridge's 60 s resync.
+- `scenario_muse_ui.py` sends one real chat message to your Muse account.
 
 ## Notes
 

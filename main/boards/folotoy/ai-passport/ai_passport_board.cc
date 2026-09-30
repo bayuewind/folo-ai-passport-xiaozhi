@@ -8,18 +8,22 @@
 #include "cw2017_battery_monitor.h"
 #include "mcp_server.h"
 
-#include <esp_log.h>
-#include <esp_lcd_panel_vendor.h>
-#include <button_adc.h>
-#include <esp_adc/adc_oneshot.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
+#include <esp_adc/adc_oneshot.h>
+#include <esp_lcd_panel_vendor.h>
+#include <esp_log.h>
+#include <esp_timer.h>
+#include <button_adc.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #define TAG "AiPassport"
 
 // Physical keys share one ADC pin through a resistor ladder (see config.h).
+// Hold OK this long to start talking; also the long-press time for UP/DOWN.
+constexpr uint16_t kLongPressMs = 400;
+
 enum {
     kAdcButtonUp = 0,
     kAdcButtonDown,
@@ -33,6 +37,12 @@ private:
     Button* adc_button_[kAdcButtonNum];
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     PassportDisplay* display_;
+    // Muse UI: hold OK to talk, and the last reply for "click OK to replay".
+    bool talk_hold_ = false;
+    esp_timer_handle_t talk_stop_timer_ = nullptr;
+    int talk_stop_ticks_ = 0;
+    std::string reply_text_;
+    std::string reply_audio_url_;
     Cw2017BatteryMonitor* battery_;
 
     void InitializeCodecI2c() {
@@ -98,46 +108,128 @@ private:
         adc_cfg.button_index = kAdcButtonUp;      // UP:   ~0 mV
         adc_cfg.min = BSP_ADC_BUTTON_UP_MIN;
         adc_cfg.max = BSP_ADC_BUTTON_UP_MAX;
-        adc_button_[kAdcButtonUp] = new AdcButton(adc_cfg);
+        adc_button_[kAdcButtonUp] = new AdcButton(adc_cfg, kLongPressMs);
 
         adc_cfg.button_index = kAdcButtonDown;    // DOWN: ~300 mV
         adc_cfg.min = BSP_ADC_BUTTON_DOWN_MIN;
         adc_cfg.max = BSP_ADC_BUTTON_DOWN_MAX;
-        adc_button_[kAdcButtonDown] = new AdcButton(adc_cfg);
+        adc_button_[kAdcButtonDown] = new AdcButton(adc_cfg, kLongPressMs);
 
         adc_cfg.button_index = kAdcButtonOk;      // OK:   ~595 mV
         adc_cfg.min = BSP_ADC_BUTTON_OK_MIN;
         adc_cfg.max = BSP_ADC_BUTTON_OK_MAX;
-        adc_button_[kAdcButtonOk] = new AdcButton(adc_cfg);
+        adc_button_[kAdcButtonOk] = new AdcButton(adc_cfg, kLongPressMs);
 
         // Button callbacks run on the button task; schedule all UI/audio
         // work onto the main task so LVGL and codec access stay on one thread.
+        // With the Muse UI: UP/DOWN click switch cards and long-press change
+        // volume; hold OK to talk, click OK to replay the last reply, double
+        // click OK to stop / undo / go home. Without the avatar pack the stock
+        // XiaoZhi mapping stays (UP/DOWN volume, OK toggles the chat).
         auto up = adc_button_[kAdcButtonUp];
         up->OnClick([this]() {
-            Application::GetInstance().Schedule([this]() { ChangeVolume(10); });
-        });
-        up->OnLongPress([this]() {
             Application::GetInstance().Schedule([this]() {
-                GetAudioCodec()->SetOutputVolume(100);
-                GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+                if (display_->HasAvatar()) {
+                    display_->StepCard(-1);
+                } else {
+                    ChangeVolume(10);
+                }
             });
         });
+        up->OnLongPress(
+            [this]() { Application::GetInstance().Schedule([this]() { ChangeVolume(10); }); });
 
         auto down = adc_button_[kAdcButtonDown];
         down->OnClick([this]() {
-            Application::GetInstance().Schedule([this]() { ChangeVolume(-10); });
-        });
-        down->OnLongPress([this]() {
             Application::GetInstance().Schedule([this]() {
-                GetAudioCodec()->SetOutputVolume(0);
-                GetDisplay()->ShowNotification(Lang::Strings::MUTED);
+                if (display_->HasAvatar()) {
+                    display_->StepCard(1);
+                } else {
+                    ChangeVolume(-10);
+                }
             });
         });
+        down->OnLongPress(
+            [this]() { Application::GetInstance().Schedule([this]() { ChangeVolume(-10); }); });
 
         auto ok = adc_button_[kAdcButtonOk];
         ok->OnClick([this]() {
-            Application::GetInstance().Schedule([this]() { ToggleChat(); });
+            Application::GetInstance().Schedule([this]() {
+                auto& app = Application::GetInstance();
+                if (!display_->HasAvatar() || app.GetDeviceState() == kDeviceStateStarting) {
+                    ToggleChat();
+                } else if (!reply_audio_url_.empty()) {
+                    app.PlayNotification(reply_audio_url_, reply_text_);
+                }
+            });
         });
+        ok->OnLongPress([this]() {
+            Application::GetInstance().Schedule([this]() {
+                if (!display_->HasAvatar()) {
+                    return;
+                }
+                talk_hold_ = true;
+                Application::GetInstance().StartListening();
+            });
+        });
+        ok->OnPressUp([this]() {
+            Application::GetInstance().Schedule([this]() {
+                if (talk_hold_) {
+                    talk_hold_ = false;
+                    StopTalking();
+                }
+            });
+        });
+        ok->OnDoubleClick([this]() {
+            Application::GetInstance().Schedule([this]() {
+                if (!display_->HasAvatar()) {
+                    return;
+                }
+                auto& app = Application::GetInstance();
+                // Stops a spoken reply and tells the server to drop a message
+                // that is still inside its undo window.
+                app.AbortSpeaking(kAbortReasonNone);
+                if (app.GetDeviceState() == kDeviceStateNotifying) {
+                    app.StopListening();  // also stops a notify playback
+                }
+                display_->ShowCard(PassportDisplay::kCardHome);
+            });
+        });
+    }
+
+    // Releasing OK while the audio channel is still opening would leave the
+    // device listening forever, so retry the stop until listening has started
+    // (or the attempt ended) for up to 5 s.
+    void StopTalking() {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() != kDeviceStateConnecting) {
+            app.StopListening();
+            return;
+        }
+        if (talk_stop_timer_ == nullptr) {
+            esp_timer_create_args_t args = {};
+            args.callback = [](void* arg) {
+                auto* self = static_cast<AiPassportBoard*>(arg);
+                Application::GetInstance().Schedule([self]() { self->RetryStopTalking(); });
+            };
+            args.arg = this;
+            args.name = "talk_stop";
+            ESP_ERROR_CHECK(esp_timer_create(&args, &talk_stop_timer_));
+        }
+        talk_stop_ticks_ = 0;
+        esp_timer_stop(talk_stop_timer_);
+        esp_timer_start_periodic(talk_stop_timer_, 100 * 1000);
+    }
+
+    void RetryStopTalking() {
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+        if (state == kDeviceStateListening) {
+            app.StopListening();
+        }
+        if (state != kDeviceStateConnecting || ++talk_stop_ticks_ >= 50) {
+            esp_timer_stop(talk_stop_timer_);
+        }
     }
 
     void InitializeTools() {
@@ -147,14 +239,17 @@ private:
             "self.avatar.set_state",
             "Set the Muse avatar state shown on the screen. state is one of default, working, "
             "making_something, waiting, approval, limited, syncing, offline, unknown, level_up, "
-            "achievement. subagents is the number of running sub-agents (working only).",
+            "achievement. subagents is the number of running sub-agents (working only). detail is "
+            "an optional short second line (about 12 characters, it is never scrolled).",
             PropertyList({
                 Property("state", kPropertyTypeString),
                 Property("subagents", kPropertyTypeInteger, 0, 0, 999),
+                Property("detail", kPropertyTypeString, std::string("")),
             }),
             [this](const PropertyList& properties) -> ToolResult {
                 auto state = properties["state"].value<std::string>();
                 auto subagents = properties["subagents"].value<int>();
+                auto detail = properties["detail"].value<std::string>();
                 if (!MuseAvatar::IsKnownState(state)) {
                     return std::unexpected("Unknown avatar state: " + state);
                 }
@@ -162,9 +257,29 @@ private:
                     return std::unexpected(std::string("Avatar partition is missing or invalid"));
                 }
                 // McpServer already runs tool callbacks on the main task.
-                if (!display_->SetAvatarState(state, subagents)) {
+                if (!display_->SetAvatarState(state, subagents, detail)) {
                     return std::unexpected("Failed to apply avatar state: " + state);
                 }
+                return true;
+            });
+
+        McpServer::GetInstance().AddTool(
+            "self.muse.set_reply",
+            "Show Muse's latest reply on the reply card. text is a short summary (three lines of "
+            "about ten characters), when a short time label such as 14:35, audio_url an optional "
+            "Ogg Opus clip of the spoken reply that OK replays.",
+            PropertyList({
+                Property("text", kPropertyTypeString),
+                Property("when", kPropertyTypeString, std::string("")),
+                Property("audio_url", kPropertyTypeString, std::string("")),
+            }),
+            [this](const PropertyList& properties) -> ToolResult {
+                if (!display_->HasAvatar()) {
+                    return std::unexpected(std::string("Muse UI is not available"));
+                }
+                reply_text_ = properties["text"].value<std::string>();
+                reply_audio_url_ = properties["audio_url"].value<std::string>();
+                display_->SetReply(reply_text_, properties["when"].value<std::string>());
                 return true;
             });
     }

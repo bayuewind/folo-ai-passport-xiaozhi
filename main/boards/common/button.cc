@@ -6,9 +6,10 @@
 #define TAG "Button"
 
 #if CONFIG_SOC_ADC_SUPPORTED
-AdcButton::AdcButton(const button_adc_config_t& adc_config) : Button(nullptr) {
+AdcButton::AdcButton(const button_adc_config_t& adc_config, uint16_t long_press_time)
+    : Button(nullptr) {
     button_config_t btn_config = {
-        .long_press_time = 2000,
+        .long_press_time = long_press_time,
         .short_press_time = 0,
     };
     ESP_ERROR_CHECK(iot_button_new_adc_device(&btn_config, &adc_config, &button_handle_));

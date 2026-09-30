@@ -29,6 +29,7 @@ struct StateInfo {
     const char* variant;
     int mode;  // MuseAvatar::Mode
     uint32_t dot_color;
+    bool attention = false;  // needs the user: amber ring around the avatar
 };
 
 // Labels follow the Muse desktop pet (desktop-pet/state.cjs). Keep them to
@@ -37,15 +38,16 @@ constexpr uint32_t kGreen = 0x83A87A;
 constexpr uint32_t kAmber = 0xD5A553;
 constexpr uint32_t kRed = 0xC98274;
 constexpr uint32_t kGrey = 0xA0A7AA;
+constexpr uint32_t kDetailText = 0x7A827C;
 
 // Mode values mirror MuseAvatar::Mode: 0 loop, 1 once, 2 still, 3 grey.
 constexpr StateInfo kStates[] = {
     {"default", "空闲中", "default", 0, kGreen},
     {"working", "正在工作", "working", 0, kGreen},
     {"making_something", "正在制作", "making_something", 0, kGreen},
-    {"waiting", "等你回应", "default", 2, kAmber},
-    {"approval", "需要你的批准", "default", 2, kAmber},
-    {"limited", "用量已耗尽", "default", 2, kRed},
+    {"waiting", "等你回应", "default", 2, kAmber, true},
+    {"approval", "需要你批准", "default", 2, kAmber, true},
+    {"limited", "用量已耗尽", "default", 2, kRed, true},
     {"syncing", "等待同步", "default", 2, kGrey},
     {"offline", "连接已中断", "default", 3, kRed},
     {"unknown", "状态未知", "default", 3, kGrey},
@@ -154,9 +156,11 @@ bool MuseAvatar::Create(lv_obj_t* parent) {
         return false;
     }
     const size_t frame_bytes = static_cast<size_t>(width_) * height_ * sizeof(uint16_t);
-    frame_ = static_cast<uint16_t*>(heap_caps_malloc(frame_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    frame_ = static_cast<uint16_t*>(
+        heap_caps_malloc(frame_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if (frame_ == nullptr) {
-        ESP_LOGE(TAG, "Cannot allocate %u B avatar frame buffer", static_cast<unsigned>(frame_bytes));
+        ESP_LOGE(TAG, "Cannot allocate %u B avatar frame buffer",
+                 static_cast<unsigned>(frame_bytes));
         return false;
     }
     memset(frame_, 0xFF, frame_bytes);
@@ -180,12 +184,19 @@ bool MuseAvatar::Create(lv_obj_t* parent) {
 
     image_ = lv_image_create(root_);
     lv_image_set_src(image_, &dsc_);
+    // Attention ring: an outline drawn outside the (circular) image bounds, so
+    // it needs no extra buffer or clipping layer.
+    lv_obj_set_style_radius(image_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_outline_color(image_, lv_color_hex(0xD39A32), 0);
+    lv_obj_set_style_outline_pad(image_, 4, 0);
+    lv_obj_set_style_outline_width(image_, 0, 0);
 
     lv_obj_t* caption = lv_obj_create(root_);
     lv_obj_remove_style_all(caption);
     lv_obj_set_size(caption, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(caption, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(caption, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(caption, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(caption, 6, 0);
     lv_obj_remove_flag(caption, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -197,15 +208,24 @@ bool MuseAvatar::Create(lv_obj_t* parent) {
 
     label_ = lv_label_create(caption);
     lv_obj_set_style_max_width(label_, 200, 0);
-    lv_label_set_long_mode(label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(label_, LV_LABEL_LONG_DOT);
+
+    // Second line: context for the state. Clipped with an ellipsis, never scrolled.
+    detail_ = lv_label_create(root_);
+    lv_obj_set_style_text_color(detail_, lv_color_hex(kDetailText), 0);
+    lv_obj_set_style_max_width(detail_, 204, 0);
+    lv_label_set_long_mode(detail_, LV_LABEL_LONG_DOT);
+    lv_obj_add_flag(detail_, LV_OBJ_FLAG_HIDDEN);
 
     timer_ = lv_timer_create(
-        [](lv_timer_t* timer) { static_cast<MuseAvatar*>(lv_timer_get_user_data(timer))->OnTimer(); },
+        [](lv_timer_t* timer) {
+            static_cast<MuseAvatar*>(lv_timer_get_user_data(timer))->OnTimer();
+        },
         1000, this);
     lv_timer_pause(timer_);
 
     // Nothing has been received from the server yet.
-    ApplyState(FindState("syncing"), 0);
+    ApplyState(FindState("syncing"), 0, "");
     ESP_LOGI(TAG, "Avatar ready: %d variants, %ux%u, frame buffer %u B", variant_count_, width_,
              height_, static_cast<unsigned>(frame_bytes));
     return true;
@@ -323,7 +343,8 @@ void MuseAvatar::OnTimer() {
     if (next >= variant.frame_count) {
         if (mode_ == kOnce || !(variant.flags & kFlagLoop)) {
             // Milestone finished: go back to whatever the server last set.
-            ApplyState(base_state_ >= 0 ? base_state_ : FindState("default"), base_subagents_);
+            ApplyState(base_state_ >= 0 ? base_state_ : FindState("default"), base_subagents_,
+                       base_detail_);
             return;
         }
         next = 0;
@@ -337,18 +358,26 @@ void MuseAvatar::OnTimer() {
     ShowFrame();
 }
 
-void MuseAvatar::ApplyState(int state_index, int subagents) {
+void MuseAvatar::ApplyState(int state_index, int subagents, const std::string& detail) {
     const StateInfo& info = kStates[state_index];
     if (info.mode != kOnce) {
         base_state_ = state_index;
         base_subagents_ = subagents;
+        base_detail_ = detail;
     }
 
     lv_obj_set_style_bg_color(dot_, lv_color_hex(info.dot_color), 0);
-    if (state_index == FindState("working") && subagents > 0) {
-        lv_label_set_text_fmt(label_, "%s · %d 个子智能体", info.label, subagents);
+    lv_label_set_text(label_, info.label);
+    lv_obj_set_style_outline_width(image_, info.attention ? 4 : 0, 0);
+    std::string line = detail;
+    if (line.empty() && state_index == FindState("working") && subagents > 0) {
+        line = std::to_string(subagents) + " 个子任务";
+    }
+    if (line.empty()) {
+        lv_obj_add_flag(detail_, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_label_set_text(label_, info.label);
+        lv_label_set_text(detail_, line.c_str());
+        lv_obj_remove_flag(detail_, LV_OBJ_FLAG_HIDDEN);
     }
 
     int variant = FindVariant(info.variant);
@@ -364,11 +393,11 @@ void MuseAvatar::ApplyState(int state_index, int subagents) {
     StartVariant(variant, static_cast<Mode>(info.mode));
 }
 
-bool MuseAvatar::SetState(const std::string& state, int subagents) {
+bool MuseAvatar::SetState(const std::string& state, int subagents, const std::string& detail) {
     int index = FindState(state);
     if (index < 0 || root_ == nullptr) {
         return false;
     }
-    ApplyState(index, subagents < 0 ? 0 : subagents);
+    ApplyState(index, subagents < 0 ? 0 : subagents, detail);
     return true;
 }

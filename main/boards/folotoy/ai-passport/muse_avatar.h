@@ -30,8 +30,10 @@ public:
     // font changes (XiaoZhi swaps in the full CJK font after assets load).
     bool Create(lv_obj_t* parent);
 
-    // Returns false for an unknown state code.
-    bool SetState(const std::string& state, int subagents);
+    // Returns false for an unknown state code. `detail` is the optional second
+    // line under the state (e.g. "3 分钟 · 2 个子任务"); it never scrolls, so the
+    // server keeps it short. Without it, a working state shows the sub-agent count.
+    bool SetState(const std::string& state, int subagents, const std::string& detail = "");
 
     static bool IsKnownState(const std::string& state);
 
@@ -57,7 +59,7 @@ private:
     bool DecodeFrame(uint16_t index);
     void ShowFrame();
     void StartVariant(int variant, Mode mode);
-    void ApplyState(int state_index, int subagents);
+    void ApplyState(int state_index, int subagents, const std::string& detail);
     void OnTimer();
 
     const esp_partition_t* partition_ = nullptr;
@@ -75,6 +77,7 @@ private:
     lv_obj_t* image_ = nullptr;
     lv_obj_t* dot_ = nullptr;
     lv_obj_t* label_ = nullptr;
+    lv_obj_t* detail_ = nullptr;
     lv_timer_t* timer_ = nullptr;
 
     int variant_ = -1;
@@ -82,6 +85,7 @@ private:
     Mode mode_ = kStill;
     int base_state_ = -1;  // state to return to after a one-shot milestone
     int base_subagents_ = 0;
+    std::string base_detail_;
 };
 
 #endif  // MUSE_AVATAR_H

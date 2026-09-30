@@ -36,7 +36,9 @@ protected:
 #if CONFIG_SOC_ADC_SUPPORTED
 class AdcButton : public Button {
 public:
-    AdcButton(const button_adc_config_t& adc_config);
+    // long_press_time: ms before a hold counts as a long press (and suppresses
+    // the click on release). Push-to-talk boards use a short value.
+    AdcButton(const button_adc_config_t& adc_config, uint16_t long_press_time = 2000);
 };
 #endif
 

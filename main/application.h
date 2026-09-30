@@ -89,6 +89,9 @@ public:
     void DismissAlert();
 
     void AbortSpeaking(AbortReason reason);
+    // Replays a remote Ogg Opus clip through the notify path (e.g. "listen to
+    // the last reply again"). Ignored unless the device is idle.
+    void PlayNotification(const std::string& audio_url, const std::string& subtitle);
 
     /**
      * Toggle chat state (event-based, thread-safe)

@@ -53,12 +53,18 @@ Device MCP tool, available over WebSocket (in a conversation) and MQTT (idle):
 | `working` | working loop | 正在工作 (· N 个子智能体) | green |
 | `making_something` | making loop | 正在制作 | green |
 | `waiting` | still | 等你回应 | amber |
-| `approval` | still | 需要你的批准 | amber |
+| `approval` | still | 需要你批准 | amber |
 | `limited` | still | 用量已耗尽 | red |
 | `syncing` | still | 等待同步 (boot default) | grey |
 | `offline` | greyed still | 连接已中断 | red |
 | `unknown` | greyed still | 状态未知 | grey |
 | `level_up` / `achievement` | plays once, then returns to the last non-milestone state | 升级啦 / 达成成就 | green |
+
+Optional `detail` (string) is the second line under the state, e.g.
+`"已 3 分钟 · 2 个子任务"` or `"下个任务 18:00"`; it is clipped, never scrolled,
+so keep it to about 12 characters. Without it a working state shows the
+sub-agent count. `waiting`, `approval` and `limited` draw an amber ring
+around the avatar.
 
 Unknown `state` values return a JSON-RPC error. Captions are built in on the
 device (MCP text is not covered by the server glyph push).
@@ -75,6 +81,22 @@ Suggested mapping from Muse `agent.status` activity codes (see the desktop pet
 | `needs_approval` | `approval` |
 | `out_of_credits` | `limited` |
 | disconnected, keep-alive failed, unknown code | `offline` / `unknown` — never `default` |
+
+## Reply card and keys
+
+`self.muse.set_reply {text, when, audio_url}` fills the second card ("最新回复"):
+`text` is a short summary (3 lines of about 10 characters), `when` a time label,
+`audio_url` an optional Ogg Opus clip that a click on OK replays.
+
+| Key | With the avatar pack | Without (stock XiaoZhi) |
+| --- | --- | --- |
+| UP / DOWN click | previous / next card | volume ±10 |
+| UP / DOWN hold | volume ±10 | volume ±10 |
+| OK hold (≥ 400 ms) | talk (push-to-talk), release to send | — |
+| OK click | replay the latest reply | start / stop the conversation |
+| OK double click | stop speaking, undo a just-sent sentence, back to home | — |
+
+The three keys share one ADC pin, so key combinations cannot be detected.
 
 ## Pack format
 
