@@ -1,0 +1,11 @@
+{
+  "name": "xiaozhi-sim-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drive XiaoZhi firmware in the FoloToy Passport browser simulator for scripted tests",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}
