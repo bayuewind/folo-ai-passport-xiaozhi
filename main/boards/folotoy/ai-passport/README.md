@@ -30,7 +30,41 @@ python scripts/build.py folotoy/ai-passport --name ai-passport
 
 Outputs `build/merged-binary.bin` (8 MB flash, USB Serial/JTAG console).
 
+## Custom voice server
+
+This checkout sets the board's default OTA URL to:
+
+```text
+https://sealtun-xiaozhi-doubao-ota-ns-d5n27ymc.sealosgzg.site/xiaozhi/ota/
+```
+
+The device sends a POST request to OTA and reads `websocket.url`, `websocket.token`,
+and `websocket.version` from the response. The expected voice endpoint is:
+
+```text
+wss://sealtun-xiaozhi-doubao-voice-ns-d5n27ymc.sealosgzg.site/xiaozhi/v1/
+```
+
+The authentication token is supplied by OTA at runtime. Keep the host computer
+online with the local gateway and both Sealtun tunnels running.
+
+A previously saved Wi-Fi `ota_url` overrides the compiled default. To change it,
+click OK during startup to enter Wi-Fi configuration, connect to `Xiaozhi-xxxx`,
+open `http://192.168.4.1`, and save the OTA URL in the advanced settings. Restart
+the device afterwards.
+
+While speaking, OK sends an abort and immediately clears the local decode and
+playback queues. Incoming audio is ignored until the next TTS start. Audio already
+being written to the codec can still have a short tail; verify interruption and
+the next question on the physical device.
+
 ## Controls
+
+The Passport codec uses a boosted output curve: 0-80% retains the previous
+gain, 90% adds 3 dB relative to the previous 90% setting, and 100% adds 6 dB
+relative to the previous maximum. Start listening at 80-90% and reduce the
+volume if speech distorts. The configured gain is not a measured loudness
+increase or a guarantee of speaker power headroom. Microphone gain is unchanged.
 
 The three physical keys map to XiaoZhi's voice-assistant actions:
 

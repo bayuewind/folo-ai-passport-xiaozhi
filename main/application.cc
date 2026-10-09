@@ -559,7 +559,7 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
+        if (GetDeviceState() == kDeviceStateSpeaking && !aborted_.load()) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
@@ -1180,6 +1180,8 @@ void Application::Schedule(std::function<void()>&& callback) {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
+    // Stop buffered audio locally before waiting for the server to acknowledge the abort.
+    audio_service_.ResetDecoder();
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }

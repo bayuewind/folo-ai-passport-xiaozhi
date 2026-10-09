@@ -6,16 +6,20 @@
 
 #define TAG "Es8311AudioCodec"
 
-Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
-    gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
-    gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk, bool pa_inverted) {
-    duplex_ = true; // 是否双工
-    input_reference_ = false; // 是否使用参考输入，实现回声消除
-    input_channels_ = 1; // 输入通道数
+Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
+                                   int input_sample_rate, int output_sample_rate, gpio_num_t mclk,
+                                   gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
+                                   gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk,
+                                   bool pa_inverted, float max_output_boost_db) {
+    duplex_ = true;            // 是否双工
+    input_reference_ = false;  // 是否使用参考输入，实现回声消除
+    input_channels_ = 1;       // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
     pa_pin_ = pa_pin;
     pa_inverted_ = pa_inverted;
+    assert(max_output_boost_db >= 0.0f && max_output_boost_db <= 6.0f);
+    max_output_boost_db_ = max_output_boost_db;
     input_gain_ = 30;
 
     assert(input_sample_rate_ == output_sample_rate_);
@@ -99,8 +103,18 @@ void Es8311AudioCodec::UpdateDeviceState() {
             .mclk_multiple = 0,
         };
         ESP_ERROR_CHECK(esp_codec_dev_open(dev_, &fs));
+        if (max_output_boost_db_ > 0.0f) {
+            // Preserve the original curve through 80%, then add boost gradually.
+            esp_codec_dev_vol_map_t points[] = {
+                {.vol = 0, .db_value = -50.0f},
+                {.vol = 80, .db_value = -10.0f},
+                {.vol = 100, .db_value = max_output_boost_db_},
+            };
+            esp_codec_dev_vol_curve_t curve = {.vol_map = points, .count = 3};
+            ESP_ERROR_CHECK(esp_codec_dev_set_vol_curve(dev_, &curve));
+        }
         ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(dev_, input_gain_));
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, output_volume_));
+        ApplyOutputVolume(output_volume_);
     } else if (!input_enabled_ && !output_enabled_ && dev_ != nullptr) {
         ESP_ERROR_CHECK(esp_codec_dev_close(dev_));
         esp_codec_dev_delete(dev_);
@@ -170,10 +184,23 @@ void Es8311AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
     ESP_LOGI(TAG, "Duplex channels created");
 }
 
+void Es8311AudioCodec::ApplyOutputVolume(int volume) {
+    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, volume));
+    if (max_output_boost_db_ > 0.0f) {
+        uint8_t dac_volume = 0;
+        if (ctrl_if_->read_reg(ctrl_if_, 0x32, 1, &dac_volume, 1) == ESP_CODEC_DEV_OK) {
+            ESP_LOGI(TAG, "Output volume %d%%, max boost %.1f dB, DAC REG32=0x%02X", volume,
+                     max_output_boost_db_, dac_volume);
+        } else {
+            ESP_LOGW(TAG, "Could not read DAC volume register");
+        }
+    }
+}
+
 void Es8311AudioCodec::SetOutputVolume(int volume) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (dev_ != nullptr) {
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, volume));
+        ApplyOutputVolume(volume);
     }
     AudioCodec::SetOutputVolume(volume);
 }

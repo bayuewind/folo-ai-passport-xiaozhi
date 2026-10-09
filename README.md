@@ -4,6 +4,13 @@ This distribution intentionally contains only the FoloToy AI Passport (ESP32-C3)
 
 (English | [中文](README_zh.md) | [日本語](README_ja.md))
 
+## Custom client release
+
+This fork configures the Passport for a self-hosted voice server via OTA, adds
+up to 6 dB of speaker gain, and clears buffered audio when speech is interrupted.
+See the [setup and flashing guide](docs/passport-client_zh.md) and
+[firmware downloads](https://github.com/bayuewind/folo-ai-passport-xiaozhi/releases).
+
 ## Introduction
 
 👉 [Human: Give AI a camera vs AI: Instantly finds out the owner hasn't washed hair for three days【bilibili】](https://www.bilibili.com/video/BV1bpjgzKEhd/)
@@ -121,7 +128,9 @@ The upstream multi-board hardware list is intentionally not included here.
 
 For beginners, it is recommended to use the firmware that can be flashed without setting up a development environment.
 
-The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by default. Personal users can register an account to use the Qwen real-time model for free.
+This fork defaults to the custom OTA service described in the
+[Passport client guide](docs/passport-client_zh.md). The upstream firmware defaults
+to the official [xiaozhi.me](https://xiaozhi.me) service.
 
 👉 [Beginner's Firmware Flashing Guide](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
 

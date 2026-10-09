@@ -1,6 +1,14 @@
-# An MCP-based Chatbot
+# FoloToy AI Passport 小智客户端
 
 （中文 | [English](README.md) | [日本語](README_ja.md)）
+
+## 本分支的客户端版本
+
+针对 FoloToy AI Passport（ESP32-C3 / 8 MB Flash）完成自建语音服务接入、
+最高 +6 dB 音量增强，以及按键打断时清空本地音频缓冲。
+
+- [配置、编译、烧录与验证说明](docs/passport-client_zh.md)
+- [下载已编译固件](https://github.com/bayuewind/folo-ai-passport-xiaozhi/releases)
 
 ## 介绍
 
@@ -107,7 +115,9 @@
 
 新手第一次操作建议先不要搭建开发环境，直接使用免开发环境烧录的固件。
 
-固件默认接入 [xiaozhi.me](https://xiaozhi.me) 官方服务器，个人用户注册账号可以免费使用 Qwen 实时模型。
+本分支默认接入自建 OTA 服务，由 OTA 下发语音 WebSocket 地址和认证令牌。
+配置方式详见[客户端使用说明](docs/passport-client_zh.md)。上游固件默认使用
+[xiaozhi.me](https://xiaozhi.me) 官方服务器。
 
 👉 [新手烧录固件教程](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
 

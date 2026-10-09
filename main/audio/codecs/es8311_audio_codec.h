@@ -20,19 +20,24 @@ private:
     esp_codec_dev_handle_t dev_ = nullptr;
     gpio_num_t pa_pin_ = GPIO_NUM_NC;
     bool pa_inverted_ = false;
+    float max_output_boost_db_ = 0.0f;
     std::mutex data_if_mutex_;
 
-    void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
+    void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout,
+                              gpio_num_t din);
     void ResetCodec();
     void UpdateDeviceState();
+    void ApplyOutputVolume(int volume);
 
     virtual int Read(int16_t* dest, int samples) override;
     virtual int Write(const int16_t* data, int samples) override;
 
 public:
-    Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
-        gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
-        gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk = true, bool pa_inverted = false);
+    Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate,
+                     int output_sample_rate, gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
+                     gpio_num_t dout, gpio_num_t din, gpio_num_t pa_pin, uint8_t es8311_addr,
+                     bool use_mclk = true, bool pa_inverted = false,
+                     float max_output_boost_db = 0.0f);
     virtual ~Es8311AudioCodec();
 
     virtual void SetOutputVolume(int volume) override;

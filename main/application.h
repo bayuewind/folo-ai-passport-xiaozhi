@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <string>
+#include <atomic>
 #include <mutex>
 #include <deque>
 #include <memory>
@@ -147,7 +148,7 @@ private:
     std::function<void(const std::string&)> mcp_broadcast_callback_;
 
     bool has_server_time_ = false;
-    bool aborted_ = false;
+    std::atomic<bool> aborted_{false};
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     bool pending_listening_start_ = false;  // Waiting for playback to drain before starting listening (auto mode)
