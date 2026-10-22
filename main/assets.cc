@@ -344,8 +344,19 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
                                  file->valuestring);
                         continue;
                     }
-                    custom_emoji_collection->AddEmoji(name->valuestring,
-                                                      new LvglRawImage(ptr, size));
+                    std::string file_name = file->valuestring;
+                    if (file_name.size() > 4 &&
+                        file_name.compare(file_name.size() - 4, 4, ".bin") == 0) {
+                        auto bin_image = new LvglBinImage(ptr, size);
+                        if (!bin_image->IsValid()) {
+                            delete bin_image;
+                            continue;
+                        }
+                        custom_emoji_collection->AddEmoji(name->valuestring, bin_image);
+                    } else {
+                        custom_emoji_collection->AddEmoji(name->valuestring,
+                                                          new LvglRawImage(ptr, size));
+                    }
                 }
             }
         }

@@ -20,17 +20,16 @@ ES8311 音频、ST7789 屏幕及 CW2017 电量计。
 默认 OTA 地址：
 
 ```text
-https://sealtun-xiaozhi-doubao-ota-ns-d5n27ymc.sealosgzg.site/xiaozhi/ota/
+https://47-93-228-85.sslip.io/xiaozhi/ota/
 ```
 
 OTA 通过 POST 请求下发语音地址及认证令牌。目前语音地址为：
 
 ```text
-wss://sealtun-xiaozhi-doubao-voice-ns-d5n27ymc.sealosgzg.site/xiaozhi/v1/
+wss://47-93-228-85.sslip.io/xiaozhi/v1/
 ```
 
-认证令牌由 OTA 在运行时提供，未写入源码。此服务依赖运行网关的电脑联网，
-以及网关和两条 Sealtun 隧道持续运行；隧道地址可能随部署变化。
+认证令牌由 OTA 在运行时提供，未写入源码。
 
 使用自己的服务时，在启动阶段按 OK 进入配网，连接 `Xiaozhi-xxxx` 热点，
 打开 `http://192.168.4.1`，在高级设置保存自己的 OTA 地址并重启。

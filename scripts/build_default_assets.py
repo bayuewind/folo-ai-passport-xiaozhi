@@ -272,6 +272,14 @@ def process_text_font(text_font_file, assets_dir):
     return None
 
 
+AVATAR_FILE = 'avatar.bin'
+AVATAR_EMOTIONS = [
+    'angry', 'confident', 'confused', 'cool', 'crying', 'delicious', 'embarrassed', 'funny',
+    'happy', 'kissy', 'laughing', 'loving', 'neutral', 'relaxed', 'sad', 'shocked', 'silly',
+    'sleepy', 'surprised', 'thinking', 'winking', 'robot_2',
+]
+
+
 def process_emoji_collection(emoji_collection_dir, assets_dir):
     """Process emoji_collection parameter"""
     if not emoji_collection_dir:
@@ -282,7 +290,7 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
     # Copy each image from input directory to build/assets directory
     for root, dirs, files in os.walk(emoji_collection_dir):
         for file in files:
-            if file.lower().endswith(('.png', '.gif')):
+            if file.lower().endswith(('.png', '.gif', '.bin')):
                 # Copy file
                 src_file = os.path.join(root, file)
                 dst_file = os.path.join(assets_dir, file)
@@ -295,8 +303,11 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
                         "name": filename_without_ext,
                         "file": file
                     })
-                    
-    
+
+    # A single avatar.bin stands in for every emotion
+    if os.path.isfile(os.path.join(emoji_collection_dir, AVATAR_FILE)):
+        emoji_list = [{"name": name, "file": AVATAR_FILE} for name in AVATAR_EMOTIONS]
+
     return emoji_list
 
 
@@ -778,6 +789,10 @@ def get_emoji_collection_path(default_emoji_collection, noto_fonts_path, project
     """
     if not default_emoji_collection:
         return None
+
+    # A directory path is used as is (e.g. a board specific avatar)
+    if os.path.isdir(default_emoji_collection):
+        return default_emoji_collection
     
     # Special handling for otto-gif collection
     if default_emoji_collection == 'otto-gif':

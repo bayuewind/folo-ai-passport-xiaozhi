@@ -22,6 +22,25 @@ bool LvglRawImage::IsGif() const {
     return ptr[0] == 'G' && ptr[1] == 'I' && ptr[2] == 'F';
 }
 
+LvglBinImage::LvglBinImage(const void* data, size_t size) {
+    bzero(&image_dsc_, sizeof(image_dsc_));
+    constexpr size_t kHeaderSize = 12;
+    auto bytes = static_cast<const uint8_t*>(data);
+    if (data == nullptr || size <= kHeaderSize || bytes[0] != LV_IMAGE_HEADER_MAGIC) {
+        ESP_LOGE(TAG, "Invalid LVGL binary image");
+        return;
+    }
+    image_dsc_.header.magic = LV_IMAGE_HEADER_MAGIC;
+    image_dsc_.header.cf = bytes[1];
+    image_dsc_.header.flags = bytes[2] | (bytes[3] << 8);
+    image_dsc_.header.w = bytes[4] | (bytes[5] << 8);
+    image_dsc_.header.h = bytes[6] | (bytes[7] << 8);
+    image_dsc_.header.stride = bytes[8] | (bytes[9] << 8);
+    image_dsc_.data = bytes + kHeaderSize;
+    image_dsc_.data_size = size - kHeaderSize;
+    valid_ = image_dsc_.header.w > 0 && image_dsc_.header.h > 0;
+}
+
 LvglCBinImage::LvglCBinImage(void* data) {
     image_dsc_ = cbin_img_dsc_create(static_cast<uint8_t*>(data));
 }

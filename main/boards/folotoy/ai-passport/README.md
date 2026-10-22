@@ -35,18 +35,17 @@ Outputs `build/merged-binary.bin` (8 MB flash, USB Serial/JTAG console).
 This checkout sets the board's default OTA URL to:
 
 ```text
-https://sealtun-xiaozhi-doubao-ota-ns-d5n27ymc.sealosgzg.site/xiaozhi/ota/
+https://47-93-228-85.sslip.io/xiaozhi/ota/
 ```
 
 The device sends a POST request to OTA and reads `websocket.url`, `websocket.token`,
 and `websocket.version` from the response. The expected voice endpoint is:
 
 ```text
-wss://sealtun-xiaozhi-doubao-voice-ns-d5n27ymc.sealosgzg.site/xiaozhi/v1/
+wss://47-93-228-85.sslip.io/xiaozhi/v1/
 ```
 
-The authentication token is supplied by OTA at runtime. Keep the host computer
-online with the local gateway and both Sealtun tunnels running.
+The authentication token is supplied by OTA at runtime.
 
 A previously saved Wi-Fi `ota_url` overrides the compiled default. To change it,
 click OK during startup to enter Wi-Fi configuration, connect to `Xiaozhi-xxxx`,
@@ -86,3 +85,15 @@ independent ADC buttons (the same pattern as the ESP-BOX-Lite).
   pull-up. Re-measure with the Button page if thresholds drift.
 - CW2017 presence is optional; without the chip the status bar shows no
   battery level and the board keeps working.
+
+## Avatar
+
+Every emotion shows one avatar, `emoji/avatar.bin`, a native LVGL RGB565A8 image
+read straight from flash. A PNG fails to decode on this board because the ESP32-C3
+has no PSRAM. To change the avatar, convert a transparent PNG and rebuild:
+
+```sh
+python3 scripts/make_avatar_bin.py my_avatar.png main/boards/folotoy/ai-passport/emoji/avatar.bin --width 80
+```
+
+`avatar/avatar.png` is the source image of the current avatar.
