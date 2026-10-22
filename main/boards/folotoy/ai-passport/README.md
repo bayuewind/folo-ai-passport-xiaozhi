@@ -97,3 +97,9 @@ python3 scripts/make_avatar_bin.py my_avatar.png main/boards/folotoy/ai-passport
 ```
 
 `avatar/avatar.png` is the source image of the current avatar.
+
+## Eye care branch
+
+This branch sets `CONFIG_HIDE_VOICE_SUBTITLE=y` in `config.json`. The recognized speech and
+the assistant reply are not shown in the bottom bar while listening and speaking. Alerts and
+other system messages still appear. Remove that line from `config.json` to show subtitles again.

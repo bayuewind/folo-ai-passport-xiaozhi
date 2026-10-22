@@ -1187,6 +1187,13 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
         HideActivationObjects(activation_qrcode_, activation_hint_label_, activation_site_label_,
                               activation_code_label_);
     }
+#if CONFIG_HIDE_VOICE_SUBTITLE
+    // Keep speech text off the screen; only system messages are shown
+    if (content != nullptr && content[0] != '\0' &&
+        (strcmp(role, "user") == 0 || strcmp(role, "assistant") == 0)) {
+        return;
+    }
+#endif
     if (chat_message_label_ == nullptr) {
         if (setup_ui_called_) {
             ESP_LOGW(TAG,
