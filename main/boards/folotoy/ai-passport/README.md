@@ -93,7 +93,7 @@ read straight from flash. A PNG fails to decode on this board because the ESP32-
 has no PSRAM. To change the avatar, convert a transparent PNG and rebuild:
 
 ```sh
-python3 scripts/make_avatar_bin.py my_avatar.png main/boards/folotoy/ai-passport/emoji/avatar.bin --width 136
+python3 scripts/make_avatar_bin.py my_avatar.png main/boards/folotoy/ai-passport/emoji/avatar.bin --width 240
 ```
 
 `avatar/avatar.png` is the source image of the current avatar.
