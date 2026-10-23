@@ -38,7 +38,7 @@ private:
     Cw2017BatteryMonitor* battery_;
 
 #if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
-    static constexpr int64_t kVolumeWakeUs = 3 * 1000 * 1000;
+    static constexpr int64_t kVolumeWakeUs = 5 * 1000 * 1000;
     static constexpr int64_t kScreenCheckUs = 250 * 1000;
 
     esp_timer_handle_t screen_timer_ = nullptr;
