@@ -8,7 +8,10 @@
 #include "cw2017_battery_monitor.h"
 
 #include <esp_log.h>
+#include <esp_sleep.h>
 #include <esp_timer.h>
+#include <driver/gpio.h>
+#include <driver/ledc.h>
 #include <esp_lcd_panel_vendor.h>
 #include <button_adc.h>
 #include <esp_adc/adc_oneshot.h>
@@ -36,9 +39,13 @@ private:
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     LcdDisplay* display_;
     Cw2017BatteryMonitor* battery_;
+    esp_lcd_panel_handle_t panel_ = nullptr;
+    // True when a key press woke the chip from deep sleep. That press is still
+    // being released while the firmware boots, so it must not count as a click.
+    bool woke_from_deep_sleep_ = false;
 
 #if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
-    static constexpr int64_t kVolumeWakeUs = 5 * 1000 * 1000;
+    static constexpr int64_t kVolumeWakeUs = 10 * 1000 * 1000;
     static constexpr int64_t kScreenCheckUs = 250 * 1000;
 
     esp_timer_handle_t screen_timer_ = nullptr;
@@ -99,6 +106,79 @@ private:
     }
 #endif
 
+#if CONFIG_DEEP_SLEEP_IDLE_MINUTES > 0
+    static constexpr int64_t kIdleSleepUs =
+        static_cast<int64_t>(CONFIG_DEEP_SLEEP_IDLE_MINUTES) * 60 * 1000 * 1000;
+    static constexpr int64_t kIdleCheckUs = 5 * 1000 * 1000;
+    static constexpr gpio_num_t kKeyGpio = GPIO_NUM_0;
+
+    esp_timer_handle_t idle_timer_ = nullptr;
+    int64_t idle_since_us_ = 0;  // main task only, 0 = not idle
+    std::atomic<bool> key_activity_{false};
+
+    void CheckIdleSleep() {
+        if (key_activity_.exchange(false) || !Application::GetInstance().CanEnterSleepMode()) {
+            idle_since_us_ = 0;
+            return;
+        }
+        int64_t now = esp_timer_get_time();
+        if (idle_since_us_ == 0) {
+            idle_since_us_ = now;
+        } else if (now - idle_since_us_ >= kIdleSleepUs) {
+            EnterDeepSleep();
+        }
+    }
+
+    void EnterDeepSleep() {
+        // A held key would wake the chip at once, so try again later.
+        gpio_set_direction(kKeyGpio, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(kKeyGpio, GPIO_PULLUP_ONLY);
+        if (gpio_get_level(kKeyGpio) == 0) {
+            idle_since_us_ = 0;
+            return;
+        }
+        ESP_LOGI(TAG, "Idle for %d min, entering deep sleep", CONFIG_DEEP_SLEEP_IDLE_MINUTES);
+
+        auto codec = GetAudioCodec();
+        codec->EnableInput(false);
+        codec->EnableOutput(false);
+
+        // Backlight pin low and held, panel in sleep mode.
+        ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, DISPLAY_BACKLIGHT_OUTPUT_INVERT ? 1 : 0);
+        gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT ? 1 : 0);
+        gpio_hold_en(DISPLAY_BACKLIGHT_PIN);
+        gpio_deep_sleep_hold_en();
+        if (panel_ != nullptr) {
+            esp_lcd_panel_disp_sleep(panel_, true);
+        }
+
+        // All three keys pull GPIO0 below 1 V, which reads as low.
+        ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(BIT(kKeyGpio),
+                                                                   ESP_GPIO_WAKEUP_GPIO_LOW));
+        esp_deep_sleep_start();
+    }
+
+    void InitializeIdleTimer() {
+        esp_timer_create_args_t args = {};
+        args.callback = [](void* arg) {
+            auto self = static_cast<AiPassportBoard*>(arg);
+            Application::GetInstance().Schedule([self]() { self->CheckIdleSleep(); });
+        };
+        args.arg = this;
+        args.dispatch_method = ESP_TIMER_TASK;
+        args.name = "idle_sleep";
+        ESP_ERROR_CHECK(esp_timer_create(&args, &idle_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(idle_timer_, kIdleCheckUs));
+    }
+#endif
+
+    void NoteKeyActivity() {
+#if CONFIG_DEEP_SLEEP_IDLE_MINUTES > 0
+        key_activity_ = true;
+#endif
+    }
+
     void InitializeCodecI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_0,
@@ -135,6 +215,9 @@ private:
     void ToggleChat() {
         auto& app = Application::GetInstance();
         if (app.GetDeviceState() == kDeviceStateStarting) {
+            if (woke_from_deep_sleep_) {
+                return;  // the key that woke the chip, not a request for Wi-Fi setup
+            }
             EnterWifiConfigMode();
             return;
         }
@@ -177,9 +260,12 @@ private:
         // Button callbacks run on the button task; schedule all UI/audio
         // work onto the main task so LVGL and codec access stay on one thread.
         auto up = adc_button_[kAdcButtonUp];
+        up->OnPressDown([this]() {
+            NoteKeyActivity();
 #if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
-        up->OnPressDown([this]() { WakeScreenForVolumeKey(); });
+            WakeScreenForVolumeKey();
 #endif
+        });
         up->OnClick([this]() {
             Application::GetInstance().Schedule([this]() { ChangeVolume(10); });
         });
@@ -191,9 +277,12 @@ private:
         });
 
         auto down = adc_button_[kAdcButtonDown];
+        down->OnPressDown([this]() {
+            NoteKeyActivity();
 #if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
-        down->OnPressDown([this]() { WakeScreenForVolumeKey(); });
+            WakeScreenForVolumeKey();
 #endif
+        });
         down->OnClick([this]() {
             Application::GetInstance().Schedule([this]() { ChangeVolume(-10); });
         });
@@ -205,6 +294,7 @@ private:
         });
 
         auto ok = adc_button_[kAdcButtonOk];
+        ok->OnPressDown([this]() { NoteKeyActivity(); });
         ok->OnClick([this]() {
             Application::GetInstance().Schedule([this]() { ToggleChat(); });
         });
@@ -280,6 +370,7 @@ private:
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
+        panel_ = panel;
 
         display_ = new SpiLcdDisplay(panel_io, panel,
                                      DISPLAY_WIDTH, DISPLAY_HEIGHT,
@@ -289,6 +380,11 @@ private:
 
 public:
     AiPassportBoard() : display_(nullptr), battery_(nullptr) {
+        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+            woke_from_deep_sleep_ = true;
+            gpio_hold_dis(DISPLAY_BACKLIGHT_PIN);
+            gpio_deep_sleep_hold_dis();
+        }
         InitializeCodecI2c();
         InitializeSpi();
         InitializeDisplay();
@@ -296,6 +392,9 @@ public:
         GetBacklight()->RestoreBrightness();
 #if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
         InitializeScreenTimer();
+#endif
+#if CONFIG_DEEP_SLEEP_IDLE_MINUTES > 0
+        InitializeIdleTimer();
 #endif
     }
 

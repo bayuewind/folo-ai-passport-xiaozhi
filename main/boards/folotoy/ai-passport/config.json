@@ -13,7 +13,8 @@
                 "CONFIG_LV_USE_QRCODE=n",
                 "CONFIG_USE_ESP_WAKE_WORD=n",
                 "CONFIG_HIDE_VOICE_SUBTITLE=y",
-                "CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY=y"
+                "CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY=y",
+                "CONFIG_DEEP_SLEEP_IDLE_MINUTES=15"
             ]
         }
     ]

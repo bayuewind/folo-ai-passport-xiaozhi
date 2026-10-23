@@ -395,6 +395,15 @@ config SCREEN_OFF_UNLESS_VOLUME_KEY
         volume key turns it on for a few seconds. The chat key never turns it on.
         Startup, Wi-Fi setup, activation, upgrade and fatal error screens stay on.
 
+config DEEP_SLEEP_IDLE_MINUTES
+    int "Enter deep sleep after this many idle minutes (0 disables)"
+    depends on BOARD_TYPE_FOLOTOY_AI_PASSPORT
+    default 0
+    range 0 1440
+    help
+        When the device has been idle with no voice session for this long it
+        powers down. Pressing any key wakes it, which restarts the firmware.
+
 choice WAKE_WORD_TYPE
     prompt "Wake Word Implementation Type"
     default USE_AFE_WAKE_WORD if (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32S31) && SPIRAM

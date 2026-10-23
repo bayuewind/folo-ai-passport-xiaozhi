@@ -105,5 +105,9 @@ the assistant reply are not shown in the bottom bar while listening and speaking
 other system messages still appear. Remove that line from `config.json` to show subtitles again.
 
 With `CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY=y` the backlight is off while idle, listening and
-speaking. Pressing a volume key (up or down) lights the screen for 5 seconds. The chat key
+speaking. Pressing a volume key (up or down) lights the screen for 10 seconds. The chat key
 does not light it. Startup, Wi-Fi setup, activation, upgrade and fatal error screens stay on.
+
+With `CONFIG_DEEP_SLEEP_IDLE_MINUTES=15` the device enters deep sleep after 15 idle minutes with
+no voice session. Any key wakes it, which restarts the firmware (about 10 seconds to be ready).
+Set it to 0 to disable deep sleep.
