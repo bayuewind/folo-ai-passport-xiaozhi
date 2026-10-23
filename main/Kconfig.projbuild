@@ -386,6 +386,15 @@ config HIDE_VOICE_SUBTITLE
         shown in the bottom subtitle bar. System messages such as alerts and
         errors are still shown.
 
+config SCREEN_OFF_UNLESS_VOLUME_KEY
+    bool "Keep the screen off except for a few seconds after a volume key press"
+    depends on BOARD_TYPE_FOLOTOY_AI_PASSPORT
+    default n
+    help
+        The backlight stays off while idle, listening and speaking. Pressing a
+        volume key turns it on for a few seconds. The chat key never turns it on.
+        Startup, Wi-Fi setup, activation, upgrade and fatal error screens stay on.
+
 choice WAKE_WORD_TYPE
     prompt "Wake Word Implementation Type"
     default USE_AFE_WAKE_WORD if (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32S31) && SPIRAM

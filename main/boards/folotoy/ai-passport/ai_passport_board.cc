@@ -8,6 +8,7 @@
 #include "cw2017_battery_monitor.h"
 
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <esp_lcd_panel_vendor.h>
 #include <button_adc.h>
 #include <esp_adc/adc_oneshot.h>
@@ -15,6 +16,8 @@
 #include <driver/spi_common.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+
+#include <atomic>
 
 #define TAG "AiPassport"
 
@@ -33,6 +36,68 @@ private:
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     LcdDisplay* display_;
     Cw2017BatteryMonitor* battery_;
+
+#if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
+    static constexpr int64_t kVolumeWakeUs = 3 * 1000 * 1000;
+    static constexpr int64_t kScreenCheckUs = 250 * 1000;
+
+    esp_timer_handle_t screen_timer_ = nullptr;
+    std::atomic<int64_t> screen_wake_until_us_{0};
+    std::atomic<bool> screen_on_{true};
+
+    // Screens the user has to read, so the backlight stays on for them.
+    static bool StateNeedsScreen(DeviceState state) {
+        switch (state) {
+            case kDeviceStateIdle:
+            case kDeviceStateConnecting:
+            case kDeviceStateListening:
+            case kDeviceStateSpeaking:
+            case kDeviceStateNotifying:
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    bool ScreenWanted() {
+        return StateNeedsScreen(Application::GetInstance().GetDeviceState()) ||
+               esp_timer_get_time() < screen_wake_until_us_.load();
+    }
+
+    // Runs on the main task.
+    void UpdateScreen() {
+        bool want_on = ScreenWanted();
+        if (want_on == screen_on_) {
+            return;
+        }
+        screen_on_ = want_on;
+        if (want_on) {
+            GetBacklight()->RestoreBrightness();
+        } else {
+            GetBacklight()->SetBrightness(0);
+        }
+    }
+
+    void WakeScreenForVolumeKey() {
+        screen_wake_until_us_ = esp_timer_get_time() + kVolumeWakeUs;
+        Application::GetInstance().Schedule([this]() { UpdateScreen(); });
+    }
+
+    void InitializeScreenTimer() {
+        esp_timer_create_args_t args = {};
+        args.callback = [](void* arg) {
+            auto self = static_cast<AiPassportBoard*>(arg);
+            if (self->ScreenWanted() != self->screen_on_) {
+                Application::GetInstance().Schedule([self]() { self->UpdateScreen(); });
+            }
+        };
+        args.arg = this;
+        args.dispatch_method = ESP_TIMER_TASK;
+        args.name = "screen_off";
+        ESP_ERROR_CHECK(esp_timer_create(&args, &screen_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(screen_timer_, kScreenCheckUs));
+    }
+#endif
 
     void InitializeCodecI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -112,6 +177,9 @@ private:
         // Button callbacks run on the button task; schedule all UI/audio
         // work onto the main task so LVGL and codec access stay on one thread.
         auto up = adc_button_[kAdcButtonUp];
+#if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
+        up->OnPressDown([this]() { WakeScreenForVolumeKey(); });
+#endif
         up->OnClick([this]() {
             Application::GetInstance().Schedule([this]() { ChangeVolume(10); });
         });
@@ -123,6 +191,9 @@ private:
         });
 
         auto down = adc_button_[kAdcButtonDown];
+#if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
+        down->OnPressDown([this]() { WakeScreenForVolumeKey(); });
+#endif
         down->OnClick([this]() {
             Application::GetInstance().Schedule([this]() { ChangeVolume(-10); });
         });
@@ -223,6 +294,9 @@ public:
         InitializeDisplay();
         InitializeButtons();
         GetBacklight()->RestoreBrightness();
+#if CONFIG_SCREEN_OFF_UNLESS_VOLUME_KEY
+        InitializeScreenTimer();
+#endif
     }
 
     virtual AudioCodec* GetAudioCodec() override {
